@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JSonar Library to Service</title>
+</head>
+<body>
+<h2>Problem</h2>
+<p>jSonar Finder has lots of dependencies that are not direct related to it.
+  Most of these dependencies could be deployed as service resulting in a simpler build cycle and a easier maintenance for both Finder and its dependencies.</p>
+<h3>Proposed Solution</h3>
+<p>The proposed solution for this problem is to implement a functionality that would automatically scan for dependencies that
+  could be deployed as service and, according to a parameter, build it as a library (jar) or as a service (war).
+  This implementation should not change the dependency's code nor the GUI's code.</p>
+<h4>Requirements</h4>
+<ul>
+  <li>The dependency's code and GUI's code should not be changed. Annotations are fine.</li>
+  <li>Implementation of a parameter to control how the dependency will be deployed.</li>
+  <li>The code to consume the services should be automatically generated in compile time.</li>
+  <li>For this first approach, all services should be deployed in the same tomcat instance.</li>
+</ul>
+<h2>Solution</h2>
+<p>To achieve this solution we are going to make use of Maven and Maven profiles,
+  custom annotations and annotation processing, JavaPoet for code generation,
+  and RestEasy.</p>
+<h3>Annotation Processing</h3>
+<p>Annotation Processing is a tool available in javac for processing annotations in compile time.
+  It is available since Java 6 and allows the developer to perform tasks like source code validation and source code generation during compile time.
+  Project Lombok, Google AutoValue and Google AutoService are examples of frameworks making use of Annotation Processing.</p>
+<p>Annotation Processing works in rounds and an annotation processor is required to make use of it.
+  In the first round, the compiler scans the source code looking for supported annotations and invoke the registered processors to process it.
+  When the round is finished, the compiler runs the cycle again for the source code generated in first round.
+  The cycle goes on until there is no more source code to be processed.</p>
+<p>A custom annotation is necessary to inform which classes will become services.
+  The annotation processor will have access to all classes annotated with our custom annotation and will generate the code
+  for consuming the services. This generated code will be compiled as a Finder dependency and it will have the same class name
+  and methods signature as the dependency's class used to generate it.</p>
+<h4>Custom Annotation</h4>
+<p>As informed in the last section, a custom annotation will be necessary to mark all classes that are going to become service.
+  Following is the code used to create the <i>@JSonarService</i> annotation:</p>
+<pre class="prettyprint" about="Teste">
+  <code class="language-java">
+  @Retention(RetentionPolicy.SOURCE)
+  @Target(ElementType.TYPE)
+  public @interface JSonarService {}
+  </code>
+</pre>
+<ul>
+  <li>
+    <b>Retention: </b>
+    Indicates how long this annotation will be retained.
+    RetentionPolicy.SOURCE indicates that this annotation should be discarded in compile time..
+  </li>
+  <li>
+    <b>Target: </b>
+    Indicates what kind of element to which this annotation is applicable.
+    ElementType.TYPE is going to be use to indicate that this annotation should be used in classes.
+  </li>
+</ul>
+<h4>AbstractProcessor</h4>
+<p>All annotation processors must be a subclass of javax.annotation.processing.AbstractProcessor.
+  This class provides a few methods for configuration and the process method itself.</p>
+<pre class="prettyprint">
+  <code class="language-java">
+  public class MyProcessor extends AbstractProcessor {
+    @Override
+    public synchronized void init(ProcessingEnvironment env){ }
+
+    @Override
+    public boolean process(Set&lt;? extends TypeElement&gt; annotations, RoundEnvironment env) { }
+
+    @Override
+    public Set&lt;String&gt; getSupportedAnnotationTypes() { }
+
+    @Override
+    public SourceVersion getSupportedSourceVersion() { }
+  }
+  </code>
+</pre>
+<ul>
+  <li>
+    <b>init(ProcessingEnvironment env):</b>
+    Method for required initialization. The ProcessingEnvironment class has a few helpers to handle messages,
+    file generation, and some utils to process elements and types.
+  </li>
+  <li>
+    <b>process(Set&lt;? extends TypeElement&gt; annotations, RoundEnvironment env):</b>
+    The main method of a processor. This is where the code for processing annotations must be implemented.
+  </li>
+  <li>
+    <b>getSupportedAnnotationTypes():</b>
+    Method to inform the compiler which annotations are supported by this processor. It can be replace by <i>@SupportedAnnotationTypes</i>.
+  </li>
+  <li>
+    <b>getSupportedSourceVersion():</b>
+    Method to inform the compiler which Java version is supported by this processor. It can be replace by <i>@SupportedSourceVersion</i>.
+  </li>
+</ul>
+<p>In our processor we don't need the init method because we are going to access the ProcessingEnvironment directly from the super class.
+  The process method we are going to generate the classes for consuming the services.
+  The methods getSupportedAnnotationType and getSupportedSourceVersion are going to be replaced for its respective annotations.</p>
+<pre class="prettyprint">
+  <code class="language-java">
+  @SupportedAnnotationTypes({"com.jsonar.annotation.JSonarService"})
+  @SupportedSourceVersion(SourceVersion.RELEASE_8)
+  @SupportedOptions({"generatedSourcesDirectory", "servicePath", "serviceAddress"})
+  public class JSonarServiceProcessor extends AbstractProcessor {
+    @Override
+    public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {}
+  }
+  </code>
+</pre>
+<ul>
+  <li>
+    <b>@SupportedAnnotationTypes: </b>
+    Indicates which annotations are going to be processed by this processor.
+  </li>
+  <li>
+    <b>@SupportedSourceVersion: </b>
+    Indicates which java version this processor supports. In this case, we are using Java 8.
+  </li>
+  <li>
+    <b>@SupportedOptions: </b>
+    Indicates all supported compiler options this processor accepts. Use -Akey or -Akey=value in compileArgs option.
+    <ul>
+      <li>generatedSourcesDirectory: Inform the path where the new code will be generated.</li>
+      <li>servicePath: The service path (usually the build final name).</li>
+      <li>serviceAddress: The address where service will be available. For this first approach, it will be http://localhost[:port]/</li>
+    </ul>
+  </li>
+</ul>
+<h4>Warning and Error messages</h4>
+<p>The ProcessingEnvironment class provides a helper to print messages during compile time.
+  At the end of a processor execution, if there's any error message, the build will fail. 
+  The configuration <i>showWarnings</i> must be enable to show warning messages in maven building cycle.</p>
+<pre class="prettyprint">
+  <code class="language-java">
+    // Prints a error message. This message will be printed in Maven's build failure message.
+    this.processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, msg, element);
+
+    // Prints a warning message. The showWarnings configuration must be enable to show the message.
+    this.processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, msg, element);
+  </code>
+</pre>
+<h4>Process Method</h4>
+<p>The process method is where all processing and generation of new source code is done.
+  Here we will check all elements annotated with our custom annotation, validate it and generate the proxy classes to access the services.
+  The following code returns all elements that are annotated with our custom annotation, validate if the element is a class
+  and print an error for all elements that are not classes.</p>
+<pre class="prettyprint">
+  <code class="language-java">
+    private List&lt;Element&gt; getElementsToProcess(RoundEnvironment roundEnv, TypeElement annotation) {
+        Set&lt;? extends Element&gt; annotatedElements = roundEnv.getElementsAnnotatedWith(annotation);
+
+        Map&lt;Boolean, List&lt;Element&gt;&gt; annotatedClasses = annotatedElements.stream().collect(
+                Collectors.partitioningBy(element -> ElementKind.CLASS == element.getKind())
+        );
+
+        List&lt;Element&gt; toProcess = annotatedClasses.get(true);
+        List&lt;Element&gt; wrongUseAnnotation = annotatedClasses.get(false);
+
+        wrongUseAnnotation.forEach(element -> error("@" + annotation.getSimpleName().toString() + " must be applied to classes", element));
+        return toProcess;
+    }
+  </code>
+</pre>
+<p>The <i>roundEnv.getElementsAnnotatedWith(annotation)</i> returns all elements in that round that are annotated with that annotation.
+  This is necessary because a processor can process more than one annotation.</p>
+<p>For each element that we gonna process, we are going to get its TypeElement and, using the design pattern Visitor, we are going to
+  access all information of that element and return a JavaPoet TypeBuilder.
+  For this step, we are going to need a subclass of SimpleElementVisitor8 provided by Java.
+  The SimpleElementVisitor8 expect 2 types to be set:</p>
+<pre class="prettyprint">
+  <code class="language-java">
+    public class SimpleElementVisitor8&lt;R,P&gt; extends SimpleElementVisitor7&lt;R,P&gt;
+  </code>
+</pre>
+<ul>
+  <li>
+    <b>R: </b>
+    Returning type of our Visitor's methods. In our case we want to return a TypeSpec.Builder (JavaPoet)
+  </li>
+  <li>
+    <b>P: </b>
+    Type of the additional parameter to our Visitor's methods.
+    In our case we are going to pass a ProcessingEnvironment to be able to print messages and to use its helpers.
+  </li>
+</ul>
+<pre class="prettyprint">
+  <code class="language-java">
+    public class ClassVisitor extends SimpleElementVisitor8&lt;TypeSpec.Builder, ProcessingEnvironment&gt;
+  </code>
+</pre>
+<h3>Source Code Generation</h3>
+<p>JavaPoet is an API for generating Java source files. It will be used to generate the client code to access the dependencies
+  that are going to be deployed as service. JavaPoet provides builders to make the process of generating new source files easier.
+  To generate classes and interfaces JavaPoet provides a TypeSpec builder. In this builder you are going to find methods like
+  addModifiers, addAnnotation, addMethod, and others. JavaPoet also provides builders to annotations (AnnotationSpec.Builder),
+  methods (MethodSpec.Builder) fields (FieldSpec.Builder) and all other kinds of elements a class might have.
+  Following is an example of a class with only a main method that prints a message:
+</p>
+<pre class="prettyprint">
+  <code class="language-java">
+    TypeSpec.Builder classBuilder = TypeSpec.classBuilder("HelloWorld")
+            .addModifiers(Modifier.PUBLIC, Modifier.FINAL);
+
+    MethodSpec.Builder methodBuilder = MethodSpec.methodBuilder("main")
+            .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
+            .returns(void.class)
+            .addParameter(String[].class, "args")
+            .addStatement("$T.out.println($S)", System.class, "Hello World!");
+
+    classBuilder.addMethod(methodBuilder.build());
+
+    try {
+        JavaFile javaFile = JavaFile.builder("com.jsonar.example", classBuilder.build()).build();
+        javaFile.writeTo(System.out);
+
+    } catch (IOException e) {
+        e.printStackTrace();
+    }
+  </code>
+</pre>
+<p>The code above will generate the following output:</p>
+<pre class="prettyprint">
+  <code class="language-java">
+    package com.jsonar.example;
+
+    import java.lang.String;
+    import java.lang.System;
+
+    public final class HelloWorld {
+      public static void main(String[] args) {
+        System.out.println("Hello World!");
+      }
+    }
+  </code>
+</pre>
+<p>All imports were handled automatically by JavaPoet. The addStatement method in MethodSpec.Builder accepts a syntax similar to String.format().
+  It is possible to use Specifiers to make the code more readable. The following specifiers are supported:</p>
+<ul>
+  <li>
+    <b>$L for Literals:</b>
+    Emit a literal value in the output. Similar to %s in the String Formatter.
+  </li>
+  <li>
+    <b>$S for Strings</b>
+    Emit a string in the output that includes quotation marks and escaping.
+  </li>
+  <li>
+    <b>$T for Types</b>
+    Used to reference types. It will automatically generate the imports.
+  </li>
+  <li>
+    <b>$N for Names</b>
+    Used to refer another element that was generated by JavaPoet.
+  </li>
+</ul>
+<h3>RestEasy Proxy Framework</h3>
+<p>RestEasy provides an easy way to consume services through interfaces (Proxy Interfaces) annotated with JAX-RS annotations.
+  Instead of using the annotations to map the request to a service, the framework uses it to get the necessary information
+  to invoke a remote service.</p>
+<p>The first step to make use of RestEasy proxy framework is writing the service interface and annotate it with JAX-RS annotations:</p>
+<pre class="prettyprint">
+  <code class="language-java">
+    @Path("/random")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    public interface RandomServiceInterface {
+      @GET
+      @Path("/int")
+      int randomInt() throws Exception;
+    }
+  </code>
+</pre>
+<p>And finally create the client and the request using our annotated interface:</p>
+<pre class="prettyprint">
+  <code class="language-java">
+    ResteasyClient client = (ResteasyClient) ClientBuilder.newBuilder().register(ResteasyJackson2Provider.class).build();
+    ResteasyWebTarget target = client.target(UriBuilder.fromPath("http://localhost:8080/service"));
+    RandomServiceInterface proxy = target.proxy(RandomServiceInterface.class);
+    int randomInt = proxy.randomInt();
+  </code>
+</pre>
+<p>This code will generate a GET request to "http://localhost:8080/service/random/int" that will return a int as response.
+  The ResteasyJackson2Provider is used to parse the request and response to/from JSON.</p>
+
+<h3>Maven</h3>
+<pre class="prettyprint">
+  <code class="language-java">
+    public static void main(String[] args) {
+        System.out.println("Hello World!!!!");
+    }
+  </code>
+</pre>
+
+<script src="https://cdn.rawgit.com/google/code-prettify/master/loader/run_prettify.js"></script>
+</body>
+</html>

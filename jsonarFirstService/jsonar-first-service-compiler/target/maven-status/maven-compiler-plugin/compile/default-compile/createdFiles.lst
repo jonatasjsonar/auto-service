@@ -1,0 +1,4 @@
+com\jsonar\firstservice\models\User.class
+com\jsonar\firstservice\services\RandomService.class
+com\jsonar\firstservice\models\Phone.class
+com\jsonar\firstservice\services\RandomServiceProxy.class

@@ -1,0 +1,6 @@
+com\jsonar\annotationprocessor\dtos\ClassDto.class
+com\jsonar\annotationprocessor\processors\JSonarServiceProcessor$1.class
+com\jsonar\annotationprocessor\visitors\MethodVisitor.class
+com\jsonar\annotationprocessor\visitors\ClassVisitor.class
+com\jsonar\annotationprocessor\visitors\ProxyInterfaceVisitor.class
+com\jsonar\annotationprocessor\processors\JSonarServiceProcessor.class
