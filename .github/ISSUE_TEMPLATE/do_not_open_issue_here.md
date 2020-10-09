@@ -8,6 +8,6 @@ assignees: 'jonatasjsonar'
 ---
 
 ## Do not open new issues here
-Use jsonar/studio repository for new issues
+Use studio repository for new issues
 https://github.com/jsonar/studio/issues
 
