@@ -1,6 +1,6 @@
 ---
-name: Use STUDIO repository for new issues
-about: Do not open new issues here. Use STUDIO repository for new issues
+name: DO NOT OPEN ISSUES HERE
+about: Use studio repository for new issues
 title: 'DO NOT OPEN ISSUE HERE'
 labels: ''
 assignees: 'jonatasjsonar'
